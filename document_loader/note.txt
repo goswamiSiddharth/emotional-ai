@@ -1,0 +1,598 @@
+THE COMPLETE GUIDE TO RETRIEVAL AUGMENTED GENERATION (RAG)
+A Deep Dive for GenAI Engineers
+==========================================================
+
+WHAT IS RAG AND WHY DOES IT EXIST?
+------------------------------------
+Large Language Models (LLMs) like Mistral, GPT-4, or Claude are trained on massive datasets
+with a knowledge cutoff date. This means they don't know:
+- What happened after their training cutoff
+- Your private company documents
+- Your personal notes or codebase
+- Real-time data like stock prices or news
+
+RAG solves this by giving the LLM a "open book" to refer to before answering.
+Instead of relying purely on what it memorized during training, the model can
+RETRIEVE relevant information from an external knowledge base and then GENERATE
+an answer using that retrieved context.
+
+Think of it like this:
+- Without RAG: You're asking a student to answer from memory
+- With RAG: You're letting the student look at a textbook before answering
+
+The answer quality improves dramatically.
+
+
+THE RAG PIPELINE — STEP BY STEP
+---------------------------------
+
+PHASE 1: INDEXING (done once, offline)
+----------------------------------------
+This is the preparation phase. You do this before users even start asking questions.
+
+Step 1 — Load Documents
+  You load your raw data. This could be:
+  - PDF files
+  - Word documents
+  - Markdown files
+  - Web pages
+  - Database records
+  - Code files
+  - CSV/Excel files
+
+  In LangChain this looks like:
+  from langchain_community.document_loaders import PyPDFLoader
+  loader = PyPDFLoader("my_document.pdf")
+  documents = loader.load()
+
+Step 2 — Split Documents into Chunks
+  You can't feed an entire 100-page PDF into an LLM context window.
+  So you split documents into smaller, overlapping chunks.
+
+  Why overlapping? Because if a relevant sentence is at the boundary
+  of two chunks, overlap ensures it's captured in at least one chunk fully.
+
+  from langchain.text_splitter import RecursiveCharacterTextSplitter
+  splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+  chunks = splitter.split_documents(documents)
+
+  chunk_size=500 means each chunk is ~500 characters.
+  chunk_overlap=50 means consecutive chunks share 50 characters.
+
+Step 3 — Create Embeddings
+  This is the most important concept in RAG.
+
+  An embedding is a numerical representation of text — a list of numbers
+  (a vector) that captures the MEANING of the text, not just the words.
+
+  Example:
+  "I love dogs" → [0.23, -0.45, 0.78, 0.12, ...]  (384 or 1536 numbers)
+  "I adore puppies" → [0.24, -0.43, 0.76, 0.14, ...] (very similar numbers!)
+  "The stock market crashed" → [-0.67, 0.89, -0.12, 0.55, ...] (very different)
+
+  Texts with similar meanings have vectors that are close to each other
+  in vector space. This is what makes semantic search possible.
+
+  Popular embedding models:
+  - text-embedding-ada-002 (OpenAI, paid)
+  - sentence-transformers/all-MiniLM-L6-v2 (HuggingFace, FREE)
+  - mistral-embed (Mistral, paid but cheap)
+  - nomic-embed-text (Ollama, local and free)
+
+Step 4 — Store in Vector Database
+  You store all the chunk embeddings in a vector database (vector store).
+  This database is optimized for similarity search — finding vectors
+  that are close to a query vector.
+
+  Popular vector databases:
+  - ChromaDB (local, free, great for learning — YOU JUST LEARNED THIS!)
+  - Pinecone (cloud, managed, production-grade)
+  - Weaviate (open source, cloud or local)
+  - FAISS (Facebook, local, very fast, no persistence by default)
+  - Qdrant (open source, Rust-based, very fast)
+  - pgvector (PostgreSQL extension, if you already use Postgres)
+
+  For your learning path, ChromaDB is perfect.
+
+
+PHASE 2: RETRIEVAL (happens at query time, online)
+----------------------------------------------------
+
+Step 5 — Embed the User Query
+  When a user asks a question, you convert that question into an embedding
+  using the SAME embedding model you used during indexing.
+
+  user_question = "What is the refund policy?"
+  query_vector = embedding_model.embed(user_question)
+
+Step 6 — Similarity Search
+  You search the vector database for the top-K chunks whose embeddings
+  are most similar to the query embedding.
+
+  The similarity is measured using:
+  - Cosine Similarity (most common — measures angle between vectors)
+  - Dot Product
+  - Euclidean Distance
+
+  The DB returns the top 3-5 most relevant chunks.
+  These chunks are your CONTEXT.
+
+Step 7 — Build the Prompt with Context
+  You now build a prompt that includes:
+  1. The retrieved context chunks
+  2. The user's original question
+
+  It looks something like:
+  ---
+  Use the following context to answer the question.
+  If the answer is not in the context, say "I don't know."
+
+  CONTEXT:
+  [chunk 1 text here]
+  [chunk 2 text here]
+  [chunk 3 text here]
+
+  QUESTION: What is the refund policy?
+  ---
+
+  This is called a STUFFING prompt (you stuff context into the prompt).
+
+
+PHASE 3: GENERATION
+---------------------
+
+Step 8 — LLM Generates the Answer
+  The LLM reads the context + question and generates an answer
+  grounded in the retrieved documents.
+
+  Because you told it to only use the context, it's less likely to hallucinate.
+  If the answer isn't in the docs, a well-prompted model will say so.
+
+
+THE FULL FLOW IN ONE PICTURE
+------------------------------
+
+User Question
+     |
+     v
+Embedding Model  →  Query Vector
+     |
+     v
+Vector DB Similarity Search  →  Top 3-5 Relevant Chunks
+     |
+     v
+Prompt = System Prompt + Context Chunks + User Question
+     |
+     v
+LLM  →  Final Answer
+
+
+TYPES OF RAG
+-------------
+
+1. Naive RAG (Basic RAG)
+   - Simple pipeline: embed → retrieve → generate
+   - Works well for simple QA over documents
+   - Weakness: retrieval quality directly limits answer quality
+
+2. Advanced RAG
+   - Pre-retrieval: query rewriting, query expansion
+   - During retrieval: re-ranking, hybrid search
+   - Post-retrieval: context compression, answer refinement
+   - Much better accuracy but more complex
+
+3. Modular RAG
+   - Treats each RAG component as a pluggable module
+   - You can swap retrievers, rerankers, generators independently
+   - Most flexible, used in production systems
+
+4. Graph RAG (Microsoft, 2024)
+   - Builds a knowledge graph from documents instead of just chunks
+   - Relationships between entities are preserved
+   - Better for complex multi-hop questions
+   - Example: "Who is the manager of the person who owns the policy?"
+
+
+KEY CONCEPTS YOU MUST KNOW
+----------------------------
+
+CHUNKING STRATEGIES
+  Fixed Size Chunking: split every N characters
+    - Simple but ignores document structure
+    - chunk_size=500, overlap=50
+
+  Recursive Character Splitting: tries to split on paragraphs → sentences → words
+    - Smarter than fixed size
+    - Default choice in LangChain
+
+  Semantic Chunking: uses embeddings to find natural topic boundaries
+    - Splits where meaning changes significantly
+    - Better quality, slower and more expensive
+
+  Document-specific: split PDFs by page, code by function, markdown by heading
+    - Best quality for structured documents
+
+
+EMBEDDING MODELS
+  Dimension: the length of the vector (384, 768, 1536)
+  Higher dimension = more expressive but more storage needed
+
+  For free/local:
+  - all-MiniLM-L6-v2: 384 dimensions, fast, good quality
+  - all-mpnet-base-v2: 768 dimensions, better quality, slower
+  - nomic-embed-text: excellent free model via Ollama
+
+  Rule: always use the SAME embedding model for indexing AND retrieval.
+  Mixing models breaks everything.
+
+
+SIMILARITY METRICS
+  Cosine Similarity: measures the angle between two vectors
+    - Range: -1 to 1 (1 = identical direction, -1 = opposite)
+    - Most popular for text embeddings
+    - Not affected by vector magnitude
+
+  Dot Product: cosine similarity × magnitude of both vectors
+    - Faster to compute
+    - Used when embeddings are normalized (same as cosine then)
+
+  Euclidean Distance: straight line distance between two points
+    - Lower = more similar
+    - Sensitive to magnitude
+
+
+TOP-K RETRIEVAL
+  When you search, you retrieve the top-K most similar chunks.
+  K=3 means you get 3 chunks back.
+
+  Too low K: might miss relevant info
+  Too high K: LLM context gets stuffed with noise, answer quality drops
+  Sweet spot: K=3 to K=5 for most use cases
+
+
+RERANKING
+  After initial retrieval (fast but approximate), a reranker
+  does a more precise relevance check on the top-K results.
+
+  Popular rerankers:
+  - Cohere Rerank (API, paid)
+  - cross-encoder/ms-marco-MiniLM (HuggingFace, free)
+  - BGE Reranker (free, excellent)
+
+  Flow: retrieve top-20 → rerank → keep top-3
+  Quality improves significantly at cost of extra latency.
+
+
+HYBRID SEARCH
+  Combines vector search (semantic) with keyword search (BM25/TF-IDF).
+
+  Vector search: finds semantically similar content
+  Keyword search: finds exact keyword matches
+
+  Why combine? Sometimes the user uses exact technical terms
+  (like a function name or product code) that vector search might miss
+  because there's no "similar meaning" — it's an exact match.
+
+  ChromaDB supports this. Weaviate and Pinecone do too.
+
+
+CONTEXT WINDOW LIMITS
+  Every LLM has a maximum context window (how much text it can read at once).
+  Mistral Small: 32K tokens
+  GPT-4: 128K tokens
+  Claude: 200K tokens
+
+  Your retrieved chunks + system prompt + conversation history
+  must all fit within this limit.
+
+  If you retrieve too many chunks, you'll hit the limit.
+  Context compression techniques help: summarize chunks before stuffing.
+
+
+HALLUCINATION IN RAG
+  Even with RAG, LLMs can hallucinate. Common causes:
+  1. Retrieved context doesn't contain the answer → model makes up an answer
+  2. Conflicting information in different chunks
+  3. Model ignores context and uses training knowledge instead
+
+  Mitigation:
+  - Add "If the answer is not in the context, say I don't know" to system prompt
+  - Use temperature=0 or low temp for factual QA
+  - Citation tracking — ask model to cite which chunk it used
+
+
+METADATA FILTERING
+  Each chunk in your vector DB can have metadata:
+  {
+    "source": "employee_handbook.pdf",
+    "page": 12,
+    "department": "HR",
+    "date": "2024-01-15"
+  }
+
+  You can filter BEFORE similarity search:
+  "Only search chunks where department = HR"
+
+  This narrows the search space and improves relevance.
+  ChromaDB supports this with the `where` parameter.
+
+
+PRACTICAL RAG WITH LANGCHAIN AND CHROMADB
+------------------------------------------
+
+Here's a minimal working RAG pipeline:
+
+from langchain_community.document_loaders import TextLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.vectorstores import Chroma
+from langchain_mistralai import ChatMistralAI
+from langchain.chains import RetrievalQA
+
+# 1. Load
+loader = TextLoader("note.txt")
+docs = loader.load()
+
+# 2. Split
+splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+chunks = splitter.split_documents(docs)
+
+# 3. Embed + Store
+embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+vectorstore = Chroma.from_documents(chunks, embeddings, persist_directory="./chroma_db")
+
+# 4. Retriever
+retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+
+# 5. LLM
+llm = ChatMistralAI(model="mistral-small-2603", temperature=0)
+
+# 6. RAG Chain
+qa_chain = RetrievalQA.from_chain_type(
+    llm=llm,
+    retriever=retriever,
+    return_source_documents=True
+)
+
+# 7. Query
+result = qa_chain.invoke({"query": "What is chunking in RAG?"})
+print(result["result"])
+
+
+EVALUATION OF RAG SYSTEMS
+---------------------------
+
+How do you know your RAG is working well?
+
+Key metrics:
+
+1. Context Relevance
+   Are the retrieved chunks actually relevant to the question?
+   Bad retrieval = bad answers, no matter how good the LLM is.
+
+2. Faithfulness
+   Is the generated answer actually supported by the retrieved context?
+   High faithfulness = low hallucination.
+
+3. Answer Relevance
+   Does the final answer actually address the user's question?
+
+4. Latency
+   How fast is the end-to-end response?
+   Indexing is offline so doesn't matter.
+   Retrieval + generation is what the user feels.
+
+Tools for RAG evaluation:
+- RAGAS (RAG Assessment) — open source, excellent
+- TruLens — another popular eval framework
+- LangSmith — LangChain's own observability tool
+
+
+COMMON RAG MISTAKES
+---------------------
+
+Mistake 1: Using the wrong chunk size
+  Too small: chunks lose context, embeddings are weak
+  Too large: irrelevant content gets retrieved along with relevant content
+  Fix: experiment with 256-1000 range for your specific data
+
+Mistake 2: Not enough overlap
+  Relevant info split across chunk boundaries gets missed
+  Fix: overlap = 10-20% of chunk size
+
+Mistake 3: Using different embedding models for indexing vs retrieval
+  This completely breaks similarity search
+  Fix: always hardcode the model name as a constant
+
+Mistake 4: Stuffing too many chunks into the prompt
+  Model gets confused with too much context
+  Fix: K=3 to K=5, use reranking to get the best ones
+
+Mistake 5: No metadata filtering
+  Searching all documents when only a subset is relevant
+  Fix: add source/category metadata and filter before search
+
+Mistake 6: Ignoring document quality
+  Garbage in, garbage out. Scanned PDFs with bad OCR ruin embeddings.
+  Fix: clean and preprocess your documents before indexing
+
+
+RAG VS FINE-TUNING — WHEN TO USE WHAT
+----------------------------------------
+
+RAG:
+  - Your knowledge base changes frequently (new docs, updated info)
+  - You need the model to cite sources
+  - You have limited compute/budget
+  - You need to add knowledge without retraining
+  - Great for: chatbots over docs, internal knowledge bases, customer support
+
+Fine-tuning:
+  - You want to change HOW the model responds (tone, style, format)
+  - You have a very specific domain with consistent patterns
+  - Your knowledge is static and won't change
+  - Great for: code generation in a specific style, medical terminology, legal language
+
+In practice: RAG + Fine-tuning together is the most powerful combo.
+Fine-tune for style, RAG for knowledge.
+
+
+PRODUCTION RAG ARCHITECTURE
+------------------------------
+
+A real production RAG system looks like this:
+
+User Query
+    |
+    v
+Query Preprocessing
+  - spell check
+  - query expansion (add synonyms)
+  - query rewriting (clarify ambiguous queries)
+    |
+    v
+Hybrid Retrieval
+  - vector search (semantic)
+  - keyword search (BM25)
+  - metadata filtering
+    |
+    v
+Reranking
+  - cross-encoder reranker
+  - keep top 3-5
+    |
+    v
+Context Compression
+  - summarize long chunks
+  - remove irrelevant sentences
+    |
+    v
+Prompt Assembly
+  - system prompt
+  - compressed context
+  - conversation history
+  - user query
+    |
+    v
+LLM Generation
+    |
+    v
+Post-processing
+  - citation extraction
+  - answer validation
+  - confidence scoring
+    |
+    v
+Final Answer + Sources
+
+
+VECTOR DATABASES COMPARISON
+------------------------------
+
+ChromaDB:
+  - Best for: learning, local development, small projects
+  - Persistence: yes (local SQLite)
+  - Hosting: local only (no cloud managed version)
+  - Speed: good for small datasets
+  - Free: yes, fully open source
+
+Pinecone:
+  - Best for: production, managed cloud
+  - Persistence: yes (cloud)
+  - Hosting: fully managed cloud
+  - Speed: excellent, optimized for scale
+  - Free: limited free tier
+
+FAISS:
+  - Best for: high-performance local search, research
+  - Persistence: manual (save/load index)
+  - Hosting: local only
+  - Speed: fastest local option (Facebook AI)
+  - Free: yes, open source
+
+Weaviate:
+  - Best for: production, complex filtering, GraphQL API
+  - Persistence: yes
+  - Hosting: local or cloud
+  - Speed: excellent
+  - Free: open source (self-host)
+
+Qdrant:
+  - Best for: production, Rust-based performance
+  - Persistence: yes
+  - Hosting: local or cloud managed
+  - Speed: extremely fast
+  - Free: open source
+
+
+YOUR LEARNING PATH FOR RAG
+----------------------------
+
+Week 1 — Foundations
+  - Understand embeddings deeply (what are vectors, cosine similarity)
+  - Run a basic ChromaDB example locally
+  - Load a text file, embed it, do a similarity search query
+  - No LLM yet, just understand the retrieval part alone
+
+Week 2 — Basic RAG Pipeline
+  - Connect retrieval to Mistral via LangChain
+  - Build a simple QA bot over a text document (like this note.txt!)
+  - Experiment with chunk sizes and K values
+  - See how changing these affects answer quality
+
+Week 3 — Advanced Retrieval
+  - Add metadata filtering
+  - Try hybrid search
+  - Experiment with a reranker
+  - Measure retrieval quality manually
+
+Week 4 — Production Patterns
+  - Add FastAPI endpoint to your RAG pipeline
+  - Connect to your React UI
+  - Add source citation display in UI
+  - Evaluate with RAGAS
+
+Project idea for portfolio:
+  Build a RAG chatbot over your own resume + job descriptions.
+  User asks: "Am I a good fit for this role at Google?"
+  Bot retrieves relevant resume sections + job description chunks
+  and gives a detailed gap analysis.
+  That's a genuinely impressive and practical portfolio project.
+
+
+IMPORTANT TERMS GLOSSARY
+--------------------------
+
+Token: the basic unit LLMs process. Roughly 0.75 words = 1 token.
+Embedding: a vector (list of numbers) representing text meaning.
+Vector: a list of floating point numbers. [0.23, -0.45, 0.78, ...]
+Vector Space: the N-dimensional space where all embeddings live.
+Cosine Similarity: how similar two vectors are (based on angle).
+Chunk: a small piece of a larger document used for indexing.
+Context Window: max tokens an LLM can process in one call.
+Retriever: the component that fetches relevant chunks from the vector DB.
+Grounding: making the LLM base its answer on specific source documents.
+Hallucination: LLM generating confident but factually wrong answers.
+Reranker: a model that re-scores retrieved chunks for better relevance.
+BM25: a classic keyword-based ranking algorithm (used in hybrid search).
+Semantic Search: search based on meaning, not exact keyword matching.
+Persist: saving the vector DB to disk so you don't re-embed every time.
+Source Documents: the original chunks retrieved, returned alongside the answer.
+
+
+SUMMARY — THE 3 THINGS RAG DOES
+---------------------------------
+
+1. RETRIEVAL: Find the most relevant pieces of information from your knowledge base
+2. AUGMENTATION: Add that information to the LLM's prompt as context
+3. GENERATION: Let the LLM generate a grounded, accurate answer
+
+RAG doesn't make the LLM smarter.
+It gives the LLM better information to work with.
+Better input → better output. Simple as that.
+
+==========================================================
+END OF NOTES
+Written for: Siddharth's GenAI Engineer Learning Path
+Topic: Retrieval Augmented Generation (RAG) — Complete Overview
+==========================================================
