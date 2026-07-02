@@ -95,10 +95,6 @@ Frontend runs on `http://localhost:5173`
 - Document fine-tuning
 - Deployment (Docker + cloud)
 
-## Demo
-
-[Watch walkthrough on Loom](link-here)
-
 ---
 
 **Portfolio piece demonstrating**: Full-stack development + AI/GenAI engineering + RAG systems
